@@ -67,6 +67,18 @@ Errors are printed to the log, and simple error objects returned. Normal return 
 	{ error: false, result: 'BOOST', unit: 192.168.x.x } 
 	{ error: false, result: '40 %', unit: 192.168.x.x } 
 
+Also possible request for multiple values at once with one 'KomfoventNodeGet' request. Payload can contain multiple id's separated with ',' eg.:
+
+	msg.payload = 'ai0,om-1,om-2,v_ph1' // would return json object with three keys: 'ai0' supply temp object, 'om-1' AWAY mode status object, 'om-2' NORMAL mode status object, 'v_ph1' panel humidity object.
+
+Multi value return object below:
+	{
+		'ai0': { error: false, result: '16.6 C', unit: 192.168.x.x },
+		'om-1': { error: false, result: false, unit: 192.168.x.x },
+		'om-2': { error: false, result: true, unit: 192.168.x.x },
+		'v_ph1': { error: false, result: '40 %', unit: 192.168.x.x } 
+	}
+
 ### Field names
 These are case sensitive
 
@@ -98,10 +110,21 @@ These are case sensitive
 - saf is suppy flow in percentage
 - eaf is extract airflow in percentage
 
+#### Operation and control codes for retrieving mode statuses
+- om-1 is AWAY mode
+- om-2 is NORMAL mode
+- om-3 is INTENSIVE mode
+- om-4 is BOOST mode
+- om-5 is KITCHEN mode
+- om-6 is FIREPLACE mode
+- om-7 is OVERRIDE
+- om-8 is HOLIDAYS
+- oc-1 is ECO mode
+- oc-2 is AUTO mode
+
 ## Future
 Add support for more modes also with timers(fireplace, kitchen ventilation etc)
 Surfarcing the actual commands sent in the config node might also be relevant in the future, making them available for change by configuration.
-For scraping, adding support to fetch which modes and controls are activated, other than actual fanspeed.
 Maybe adding support for specifically handling the modes implemented as toggle switches (auto, eco) and remove the toggle issue of the controller. But this has multiple quality/troubleshooting implications and would require scraping actual data from the controller first.
 
 
