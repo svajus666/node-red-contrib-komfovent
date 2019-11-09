@@ -10,13 +10,33 @@ module.exports = function (RED) {
     this.siteName = config.siteName;
     // komfovent ajax values to pass for the modes (fireplace and kitchen must be supplied with timer values 283=80 for 80 mins run tim)
     var mode = {
-      home: '3=2',
-      away: '3=1',
-      auto: '285=2',
-      intensive: '3=3',
-      boost: '3=4',
-      fireplace: '283',
-      kitchen: '282'
+      away: {
+        activate: '3=1'
+      },
+      home: {
+        activate: '3=2'
+      },
+      intensive: {
+        activate: '3=3'
+      },
+      boost: {
+        activate: '3=4'
+      },
+      kitchen: {
+        activate: '282=15'
+      },
+      fireplace: {
+        activate: '283=15'
+      },
+      override: {
+        activate: '284=15'
+      },
+      eco: {
+        activate: '285=1'
+      },
+      auto: {
+        activate: '285=2'
+      }
     };
     this.mode = mode;
   }

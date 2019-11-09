@@ -31,45 +31,26 @@ module.exports = function (RED) {
     // what to do with payload incoming ///
     this.on('input', function (msg) {
       // validate input, right mode and lookup code
-      var pay = msg.payload.toLowerCase();
-      var mode = { name: 'auto', code: '285=2' };
+      let pay = msg.payload.toLowerCase();
+      let mode = {
+        name: pay,
+        code: ''
+      };
 
-      switch (pay) {
-        case 'away':
-          mode.code = node.komfoUser.mode.away;
-          break;
-        case 'home':
-          mode.code = node.komfoUser.mode.home;
-          break;
-        case 'intensive':
-          mode.code = node.komfoUser.mode.intensive;
-          break;
-        case 'boost':
-          mode.code = node.komfoUser.mode.boost;
-          break;
-        case 'auto':
-          mode.code = node.komfoUser.mode.auto;
-          break;
-        default:
-          node.warn('Komfovent - unsupported mode');
-          msg.payload = { Error: true, details: 'unsupported mode', unit: node.komfoUser.ip };
-          node.send(msg);
-          return;
-      }
-      mode.name = pay;
-      // logon to komfovent each time, with callback below
-      // node.debug('Komfovent - connecting to adress http://' + node.komfoUser.ip);
-      komfovent.login(
+      let modeControls = node.komfoUser.mode[pay];
+      if (modeControls === 'undefined' || !modeControls) {
+        msg.payload = { Error: true, details: 'unsupported mode', unit: node.komfoUser.ip };
+        node.send(msg);
+      } else {
+        mode.code = modeControls.activate;
+
+        komfovent.login(
           node.komfoUser.credentials.username,
           node.komfoUser.credentials.password,
           node.komfoUser.ip,
           function (success, message) {
             if (success == false) {
-              msg.payload = {
-                error: true,
-                details: message,
-                unit: node.komfoUser.ip
-              };
+              msg.payload = { error: true, details: message, unit: node.komfoUser.ip };
               node.send(msg);
             }
             else {
@@ -80,6 +61,7 @@ module.exports = function (RED) {
               }); // komfomode end
             }
           }); // login end
+      }
     }); // this on.input end
   }
 
