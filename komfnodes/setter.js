@@ -1,6 +1,8 @@
+const komfovent = require("../lib/komfovent");
+const request = require('request');
+
 module.exports = function (RED) {
   'use strict';
-  var request;
 
   function komfoventNode (config) {
     RED.nodes.createNode(this, config);
@@ -31,7 +33,6 @@ module.exports = function (RED) {
       // validate input, right mode and lookup code
       var pay = msg.payload.toLowerCase();
       var mode = { name: 'auto', code: '285=2' };
-      request = require('request');
 
       switch (pay) {
         case 'away':
@@ -57,56 +58,29 @@ module.exports = function (RED) {
       }
       mode.name = pay;
       // logon to komfovent each time, with callback below
-      node.debug('Komfovent - connecting to adress http://' + node.komfoUser.ip);
-      komfoLogon(node, msg, function (result) {
-        msg.payload = result;
-        if (result.error) {
-          // didnt work, return msg with error to the flow
-          node.warn('An error occured logging on');
-          node.send(msg);
-        }
-        else {
-          // send http ajax to set mode, with callback below
-          komfoMode(mode, node, msg, function (result) {
-            msg.payload = result;
-            node.send(msg);
-          }); // komfomode end
-        }
-      }); // komfologon end
+      // node.debug('Komfovent - connecting to adress http://' + node.komfoUser.ip);
+      komfovent.login(
+          node.komfoUser.credentials.username,
+          node.komfoUser.credentials.password,
+          node.komfoUser.ip,
+          function (success, message) {
+            if (success == false) {
+              msg.payload = {
+                error: true,
+                details: message,
+                unit: node.komfoUser.ip
+              };
+              node.send(msg);
+            }
+            else {
+              // send http ajax to set mode, with callback below
+              komfoMode(mode, node, msg, function (result) {
+                msg.payload = result;
+                node.send(msg);
+              }); // komfomode end
+            }
+          }); // login end
     }); // this on.input end
-  }
-
-  // function purely for handling logon
-  function komfoLogon (node, msg, call) {
-    var logonBody = '1=' + node.komfoUser.credentials.username + '&' + '2=' + node.komfoUser.credentials.password;
-    request.post({
-      url: 'http://' + node.komfoUser.ip,
-      headers: { 'Content-Length': logonBody.length },
-      body: logonBody
-    }, function (err, result, body) {
-      // node.debug('Komfovent -  logon result - Error ' + err);
-      if (err) {
-        node.warn('Komfovent - Problem logging on komfovent: ' + JSON.stringify(err));
-        if (err.errno === 'ENOTFOUND' || err.errno === 'EHOSTDOWN') {
-          node.warn('address not found for unit' + node.komfoUser.ip);
-          call({ error: true, details: err });
-        }
-        else {
-          node.warn('unknown issue connecting');
-          call({ error: true, details: err });
-        }
-      }
-      else if (body.indexOf('Incorrect password!') >= 0) {
-        node.warn('Komfovent - wrong password for unit');
-        node.debug('Komfovent return: ' + result.body);
-        call({ error: true, details: err });
-      }
-      else {
-        // for now, assuimg this means we're logged on
-        // node.debug('Komfovent - got logon result back - success');
-        call({ error: false, details: 'logged on' });
-      }
-    });
   }
 
   // function for setting mode

@@ -1,7 +1,9 @@
+const komfovent = require("../lib/komfovent");
+const request = require('request');
+const cheerio = require('cheerio');
+
 module.exports = function(RED) {
     'use strict';
-    var request;
-    var scraper;
 
     function komfoventNodeGet(config) {
         RED.nodes.createNode(this, config);
@@ -28,58 +30,58 @@ module.exports = function(RED) {
 
         // what to do with payload incoming ///
         this.on('input', function(msg) {
-            request = require('request');
-            scraper = require('cheerio');
-
             if (typeof msg.payload !== 'string' || !msg.payload || msg.payload === '') {
                 node.warn('Komfovent - empty ID received, quitting');
                 return;
             }
-            komfoLogon(node, function(resultLogon) {
-                if (resultLogon.error) {
-                    node.debug('Komfovent getNode error logging on');
-                    msg.payload = resultLogon;
-                    node.send(msg);
-                }
-                else {
-                    let idArray = msg.payload.split(",");
-                    let resultPayload = {};
-                    let promises = [];
-
-                    //Read values from main page
-                    let mainPageIdArray = idArray.filter(isMainPageId);
-                    if (mainPageIdArray.length > 0) {
-                        promises.push(readPage(node, '', readIdValuesAction(mainPageIdArray, resultPayload)));
-                    }
-
-                    //Read values from details page
-                    let detPageIdArray = idArray.filter(isDetailsPageId);
-                    if (detPageIdArray.length > 0) {
-                        promises.push(readPage(node, '/det.html', readIdValuesAction(detPageIdArray, resultPayload)));
-                    }
-
-                    //Get selected mode status
-                    let selectedModeArray = idArray.filter(isModeId);
-                    if (selectedModeArray.length > 0) {
-                        promises.push(readPage(node, '/i.asp', readModeStatusAction(selectedModeArray, resultPayload)));
-                    }
-
-                    //Wait for all pages parsing results
-                    Promise.all(promises).then((pages) => {
-                        //Backwards compatibility for single id
-                        if (idArray.length == 1) {
-                            msg.payload = resultPayload[idArray[0]];
-                        }
-                        else {
-                            msg.payload = resultPayload;
-                        }
-
+            komfovent.login(
+                node.komfoUser.credentials.username,
+                node.komfoUser.credentials.password,
+                node.komfoUser.ip,
+                function(success, message) {
+                    if (success == false) {
+                        msg.payload = buildResultNode(true, message, node);
                         node.send(msg);
-                    }).catch(function(error) {
-                        node.error('Error during page reading: ' + error);
-                    });
-                }
-            });
+                    }
+                    else {
+                        let idArray = msg.payload.split(",");
+                        let resultPayload = {};
+                        let promises = [];
+
+                        //Read values from main page
+                        let mainPageIdArray = idArray.filter(isMainPageId);
+                        if (mainPageIdArray.length > 0) {
+                            promises.push(readPage(node, '', readIdValuesAction(mainPageIdArray, resultPayload)));
+                        }
+
+                        //Read values from details page
+                        let detPageIdArray = idArray.filter(isDetailsPageId);
+                        if (detPageIdArray.length > 0) {
+                            promises.push(readPage(node, '/det.html', readIdValuesAction(detPageIdArray, resultPayload)));
+                        }
+
+                        //Get selected mode status
+                        let selectedModeArray = idArray.filter(isModeId);
+                        if (selectedModeArray.length > 0) {
+                            promises.push(readPage(node, '/i.asp', readModeStatusAction(selectedModeArray, resultPayload)));
+                        }
+
+                        //Wait for all pages parsing results
+                        Promise.all(promises).then((pages) => {
+                            //Backwards compatibility for single id
+                            if (idArray.length == 1) {
+                                msg.payload = resultPayload[idArray[0]];
+                            }
+                            else {
+                                msg.payload = resultPayload;
+                            }
+
+                            node.send(msg);
+                        }).catch(function(error) {
+                            node.error('Error during page reading: ' + error);
+                        });
+                    }
+                });
         }); // end this.on
     } // end komfovent node get
 
@@ -162,7 +164,7 @@ module.exports = function(RED) {
         return new Promise(resolve => {
             getPage(node, page, function(resultGetPage, body) {
                 if (!resultGetPage.error && body !== '') {
-                    let scraped = scraper.load(body);
+                    let scraped = cheerio.load(body);
                     actionFunction(node, scraped);
                 }
                 else {
@@ -190,36 +192,6 @@ module.exports = function(RED) {
                     call(buildResultNode(true, JSON.stringify(err), node), '');
                 }
             });
-    }
-
-    // function purely for handling logon (yes, currently duplicated from setter.js)
-    function komfoLogon(node, call) {
-        var logonBody = '1=' + node.komfoUser.credentials.username + '&' + '2=' + node.komfoUser.credentials.password;
-        request.post({
-            url: 'http://' + node.komfoUser.ip,
-            headers: { 'Content-Length': logonBody.length },
-            body: logonBody
-        }, function(err, result, body) {
-            // node.debug('Komfovent -  logon result - Error ' + err);
-            if (err) {
-                node.warn('Komfovent - Problem logging on komfovent: ' + JSON.stringify(err));
-                if (err.errno === 'ENOTFOUND' || err.errno === 'EHOSTDOWN') {
-                    call(buildResultNode(true, 'address not found for unit', node));
-                }
-                else {
-                    call(buildResultNode(true, JSON.stringify(err), node));
-                }
-            }
-            else if (body.indexOf('Incorrect password!') >= 0) {
-                node.warn('Komfovent - wrong password for unit');
-                node.debug('Komfovent return: ' + result.body);
-                call(buildResultNode(true, 'wrong password ', node));
-            }
-            else {
-                // for now, assuming this means we're logged on
-                call(buildResultNode(false, 'logged on', node));
-            }
-        });
     }
 
     function buildResultNode(error, result, node) {
