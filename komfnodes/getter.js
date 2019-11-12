@@ -1,5 +1,4 @@
 const komfovent = require("../lib/komfovent");
-const request = require('request');
 const cheerio = require('cheerio');
 
 module.exports = function(RED) {
@@ -15,16 +14,20 @@ module.exports = function(RED) {
             this.komfoUser = RED.nodes.getNode(config.user);
         }
         catch (err) {
-            this.error('Komfovent - Error, no login node exists - komfovent - setter.js l-13: ' + err);
-            this.debug('Komfovent - Couldnt get config node : ' + this.komfoUser);
+            this.error('Komfovent - Error, no login node exists - komfovent - setter.js: ' + err);
+            return;
         }
         // validate settings when creating node
-        if (typeof node.komfoUser === 'undefined' || !node.komfoUser || !node.komfoUser.credentials.username || !node.komfoUser.credentials.password) {
-            this.warn('Komfovent - No credentials given! Missing config node details. komfovent setter.js l-17 :' + node.komfoUser);
+        if (typeof node.komfoUser === 'undefined'
+                || !node.komfoUser
+                || !node.komfoUser.credentials
+                || !node.komfoUser.credentials.username
+                || !node.komfoUser.credentials.password) {
+            this.error('Komfovent - No credentials given! Missing config node details. komfovent setter.js l-17 :' + node.komfoUser);
             return;
         }
         if (typeof node.komfoUser.ip === 'undefined' || !node.komfoUser.ip) {
-            this.warn('Komfovent - No IP to komfovent unit found, cannot continue');
+            this.error('Komfovent - No IP to komfovent unit found, cannot continue');
             return;
         }
 
@@ -38,7 +41,7 @@ module.exports = function(RED) {
                 node.komfoUser.credentials.username,
                 node.komfoUser.credentials.password,
                 node.komfoUser.ip,
-                function(success, message) {
+                (success, message) => {
                     if (success == false) {
                         msg.payload = buildResultNode(true, message, node);
                         node.send(msg);
@@ -162,36 +165,20 @@ module.exports = function(RED) {
 
     function readPage(node, page, actionFunction) {
         return new Promise(resolve => {
-            getPage(node, page, function(resultGetPage, body) {
-                if (!resultGetPage.error && body !== '') {
-                    let scraped = cheerio.load(body);
-                    actionFunction(node, scraped);
-                }
-                else {
-                    node.warn('Komfovent error fetching page: http://' + node.komfoUser.ip);
-                }
-
-                resolve(page);
-            });
+            komfovent.getPage(
+                node.komfoUser.ip,
+                page,
+                (status, message, body) => {
+                    if (status == true && body !== '') {
+                        let scraped = cheerio.load(body);
+                        actionFunction(node, scraped);
+                    }
+                    else {
+                        node.error('Komfovent error fetching page[' + page + '] on IP[' + node.komfoUser.ip +'] with error: ' + message);
+                    }
+                    resolve(page);
+                });
         });
-    }
-
-    // function for fetching the page and scrape with cheerio, param page for subpages feature later
-    function getPage(node, page, call) {
-        request.post({
-                url: 'http://' + node.komfoUser.ip + page,
-                headers: {}
-            },
-            function(err, result, body) {
-                node.debug('Komfovent -  logon result - Error ' + err);
-                if (!err) {
-                    call(result, body);
-                }
-                else {
-                    node.warn('Error getting page');
-                    call(buildResultNode(true, JSON.stringify(err), node), '');
-                }
-            });
     }
 
     function buildResultNode(error, result, node) {

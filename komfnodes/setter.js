@@ -1,5 +1,9 @@
 const komfovent = require("../lib/komfovent");
-const request = require('request');
+const _stringCount = require("underscore.string/count");
+
+const MODE_SPLIT = ',';
+const ACTION_SPLIT = ':';
+const ACTION_VALUE_PLACEHOLDER = '{}';
 
 module.exports = function (RED) {
   'use strict';
@@ -15,82 +19,135 @@ module.exports = function (RED) {
       this.komfoUser = RED.nodes.getNode(config.user);
     }
     catch (err) {
-      this.error('Komfovent - Error, no login node exists - komfovent - setter.js l-13: ' + err);
-      this.debug('Komfovent - Couldnt get config node : ' + this.komfoUser);
+      this.error('Komfovent - Error, no login node exists - komfovent - setter.js: ' + err);
+      return;
     }
     // validate settings when creating node
-    if (typeof node.komfoUser === 'undefined' || !node.komfoUser || !node.komfoUser.credentials.username || !node.komfoUser.credentials.password) {
-      this.warn('Komfovent - No credentials given! Missing config node details. komfovent setter.js l-17 :' + node.komfoUser);
+    if (typeof node.komfoUser === 'undefined'
+            || !node.komfoUser
+            || !node.komfoUser.credentials
+            || !node.komfoUser.credentials.username
+            || !node.komfoUser.credentials.password) {
+      this.error('Komfovent - No credentials given! Missing config node details. komfovent setter.js l-17 :' + node.komfoUser);
       return;
     }
     if (typeof node.komfoUser.ip === 'undefined' || !node.komfoUser.ip) {
-      this.warn('Komfovent - No IP to komfovent unit found, cannot continue');
+      this.error('Komfovent - No IP to komfovent unit found, cannot continue');
       return;
     }
 
     // what to do with payload incoming ///
-    this.on('input', function (msg) {
-      // validate input, right mode and lookup code
-      let pay = msg.payload.toLowerCase();
-      let mode = {
-        name: pay,
-        code: ''
-      };
-
-      let modeControls = node.komfoUser.mode[pay];
-      if (modeControls === 'undefined' || !modeControls) {
-        msg.payload = { Error: true, details: 'unsupported mode', unit: node.komfoUser.ip };
-        node.send(msg);
-      } else {
-        mode.code = modeControls.activate;
-
-        komfovent.login(
-          node.komfoUser.credentials.username,
-          node.komfoUser.credentials.password,
-          node.komfoUser.ip,
-          function (success, message) {
-            if (success == false) {
-              msg.payload = { error: true, details: message, unit: node.komfoUser.ip };
+    this.on('input', (msg) => {
+      buildAjaxRequestBody(
+          msg.payload,
+          node.komfoUser.mode,
+          (status, result) => {
+            if (status == false) {
+              msg.payload = { 'error': true, 'result': result, 'unit': node.komfoUser.ip };
               node.send(msg);
+            } else {
+              komfovent.login(
+                  node.komfoUser.credentials.username,
+                  node.komfoUser.credentials.password,
+                  node.komfoUser.ip,
+                  (status, message) => {
+                    if (status == false) {
+                      msg.payload = { 'error': true, 'result': message, 'unit': node.komfoUser.ip };
+                      node.send(msg);
+                    }
+                    else {
+                      // send http ajax to set mode, with callback below
+                      komfovent.ajaxCall(
+                          node.komfoUser.ip,
+                          result,
+                          (status, result) => {
+                            if (status == true) {
+                                msg.payload = { 'error': false, 'result': 'ok', 'unit': node.komfoUser.ip };
+                            } else {
+                                msg.payload = { 'error': true, 'result': result, 'unit': node.komfoUser.ip };
+                            }
+                            node.send(msg);
+                          });
+                    }
+                  });
             }
-            else {
-              // send http ajax to set mode, with callback below
-              komfoMode(mode, node, msg, function (result) {
-                msg.payload = result;
-                node.send(msg);
-              }); // komfomode end
-            }
-          }); // login end
-      }
+          });
     }); // this on.input end
   }
 
-  // function for setting mode
-  function komfoMode (mode, node, msg, call) {
-    node.debug('Payload start function ' + mode.code);
-    request.post({
-      url: 'http://' + node.komfoUser.ip + '/ajax.xml',
-      headers: { 'Content-Length': mode.code.length },
-      body: mode.code
-    }, function (err, result) {
-      node.debug('Komfovent - set-mode result - Error ' + err);
-      // node.debug('komfovent result is in komfo - Body ' + result.body)
-      if (err) {
-        node.warn('Komfovent - Problem setting mode : ' + JSON.stringify(err));
-        if (err.errno === 'ENOTFOUND' || err.errno === 'EHOSTDOWN') {
-          node.warn('Komfovent - cannot reach unit for set-mode, unit not found - ' + node.komfouser.ip);
+  function buildAjaxRequestBody(payload, modeControls, callback) {
+    if (!payload) {
+        callback(false, 'Payload is empty.');
+        return;
+    }
+
+    let modes = payload.split(MODE_SPLIT);
+
+    //Backwards compatibility
+    if (modes.length == 1 && modes[0].split(ACTION_SPLIT).length == 1) {
+        let legacyAjaxCall = modeControls[modes[0]].activate;
+        if (!legacyAjaxCall) {
+            callback(false, 'Payload is invalid, unsupported mode [' + payload + ']');
+        } else {
+            callback(true, legacyAjaxCall);
         }
-        else {
-          node.warn('unknown connection issue' + node.komfoUser.ip);
+        return;
+    }
+
+    //New payload flow
+    let ajaxBody = '';
+    for (const controlString of modes) {
+      let values = controlString.split(ACTION_SPLIT);
+
+      //Check or we have at least two parts MODE and ACTION
+      if (values.length < 2) {
+        callback(false, 'Payload is invalid, it must contains mode and action and/or value e.g. away:activate, away:temperature:22');
+        return;
+      }
+
+      //Check or we have this MODE configured
+      let mode = values[0].trim();
+      let configMode = modeControls[mode];
+      if (!configMode) {
+        callback(false, 'Mode [' + mode + '] is not configured.');
+        return;
+      }
+
+      //Check or we have this ACTION for MODE configured
+      let action = values[1].trim();
+      let configAction = configMode[action];
+      if (!configAction) {
+        callback(false, 'Action [' + action + '] is not configured for mode[' + mode + '].');
+        return;
+      }
+
+      //Check or we have same value count in config and payload
+      let requiredValues = _stringCount(configAction, ACTION_VALUE_PLACEHOLDER);
+      let haveValues = values.length - 2;
+      if (requiredValues != haveValues) {
+        callback(false, 'Action [' + action + '] for mode[' + mode + '] requires [' + requiredValues + '] values, payload contains [' + haveValues + '] values.');
+        return;
+      }
+
+      //Fill values
+      for (let i = 2; i < values.length; i++) {
+        let value = values[i];
+        //TODO: validate type required for request: date for holidays, number with decimal for temperature.
+        if (value < 0) {
+            callback(false, 'Action [' + action + '] for mode[' + mode + '] input value at position #' + (i - 1) + ' is negative [' + value + '].');
+            return;
         }
+        configAction = configAction.replace(ACTION_VALUE_PLACEHOLDER, parseInt(value));
       }
-      else {
-        // for now assuming this means mode has been set
-        node.debug('Komfovent setmode return status: ' + result.statusCode);
-        // node.debug('Komfovent set mode - returned body \n\r' + result.body);
-        return call({ error: false, result: mode.name, unit: node.komfoUser.ip });
-      }
-    });
+
+      ajaxBody += configAction;
+    }
+
+    if (ajaxBody === '') {
+        callback(false, 'Empty ajax body after payload parsing, check your payload validity.');
+    } else {
+        callback(true, ajaxBody);
+    }
   }
 
   RED.nodes.registerType('komfoventNode', komfoventNode);
