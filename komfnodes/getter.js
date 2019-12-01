@@ -151,9 +151,23 @@ module.exports = function(RED) {
                         case 'oc-2':
                             result = ((v >> 23 & 1) == 1);
                             break;
+                        case 'status-icons':
+                            let vStatus = parseInt(v >> 0 & 8191);
+                            result = {
+                                'fan': (vStatus & 1 << 2) != 0,
+                                'heat_exchanger': (vStatus & 1 << 3) != 0,
+                                'heating': (vStatus & 1 << 4) != 0,
+                                'cooling': (vStatus & 1 << 5) != 0,
+                                'heater_blocking': (vStatus & 1 << 6) != 0,
+                                'cooler_blocking': (vStatus & 1 << 7) != 0,
+                                'flow_down': (vStatus & 1 << 8) != 0,
+                                'free_heating': (vStatus & 1 << 9) != 0,
+                                'free_cooling': (vStatus & 1 << 10) != 0
+                            };
+                            break;
                         default:
                             error = true;
-                            result = 'Mode ID not supported. Supported values om-[1:8] and oc-[1:2].'
+                            result = 'Mode ID not supported. Supported values "status-icons", "om-[1:8]" and "oc-[1:2]".'
                             break;
                     }
 
